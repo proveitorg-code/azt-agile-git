@@ -2,6 +2,7 @@
 -- Run once against a fresh database: psql "$DATABASE_URL" -f schema.sql
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS citext;   -- case-insensitive email column, must exist before it's used below
 
 -- ---------------------------------------------------------------------
 -- USERS
@@ -17,9 +18,6 @@ CREATE TABLE IF NOT EXISTS users (
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- citext extension needed for case-insensitive email column above
-CREATE EXTENSION IF NOT EXISTS citext;
 
 -- ---------------------------------------------------------------------
 -- ENCRYPTED USER PROGRESS (their board / issues data)
@@ -101,3 +99,4 @@ CREATE INDEX IF NOT EXISTS idx_link_codes_user ON link_codes(user_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_premium_requests_user ON premium_requests(user_id);
+
