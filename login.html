@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nimbus — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F5F6FA;
+    --surface:#FFFFFF;
+    --ink:#1B1D28;
+    --muted:#6B7086;
+    --border:#E4E5EE;
+    --border-soft:#ECEDF4;
+    --accent:#5B5FEF;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#EDEDFD;
+    --danger:#E24C4B;
+    --danger-soft:#FDECEC;
+    --success:#1FA97A;
+    --success-soft:#E7F8F1;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    font-family:var(--font-body); background:var(--bg); color:var(--ink); padding:24px;
+  }
+  .card{
+    width:100%; max-width:400px; background:var(--surface); border:1px solid var(--border);
+    border-radius:16px; padding:32px; box-shadow:0 12px 32px rgba(30,32,60,0.06);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; margin-bottom:22px; }
+  .brand-mark{
+    width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(135deg,var(--accent),#8B8EFF); font-family:var(--font-display);
+    font-weight:700; color:#fff; font-size:16px;
+  }
+  .brand-name{ font-family:var(--font-display); font-weight:700; font-size:17px; }
+  h1{ font-family:var(--font-display); font-size:21px; margin:0 0 4px; }
+  .subtitle{ color:var(--muted); font-size:13.5px; margin:0 0 24px; }
+  .tabs{ display:flex; background:var(--bg); border-radius:10px; padding:3px; margin-bottom:22px; }
+  .tab{
+    flex:1; text-align:center; padding:8px 0; border-radius:8px; font-size:13.5px; font-weight:600;
+    color:var(--muted); cursor:pointer; user-select:none; transition:background .12s, color .12s;
+  }
+  .tab.active{ background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(20,20,40,0.06); }
+  label{ display:block; font-size:12.5px; font-weight:600; color:var(--muted); margin:14px 0 6px; }
+  label:first-of-type{ margin-top:0; }
+  input{
+    width:100%; padding:10px 12px; border-radius:9px; border:1px solid var(--border);
+    background:var(--bg); font-size:14px; font-family:inherit; color:var(--ink);
+  }
+  input:focus{ outline:2px solid var(--accent-soft); border-color:var(--accent); }
+  .pw-rules{ font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.5; }
+  .pw-rules ul{ margin:4px 0 0; padding-left:16px; }
+  .pw-rules li.met{ color:var(--success); }
+  .pw-rules li.met::marker{ content:"✓ "; }
+  .btn-primary{
+    width:100%; margin-top:20px; padding:11px 0; border-radius:9px; border:none;
+    background:var(--accent); color:#fff; font-size:14.5px; font-weight:600; cursor:pointer;
+    font-family:inherit; transition:opacity .12s;
+  }
+  .btn-primary:disabled{ opacity:.55; cursor:not-allowed; }
+  .btn-primary:hover:not(:disabled){ opacity:.92; }
+  .guest-link{
+    display:block; text-align:center; margin-top:16px; font-size:13px; color:var(--muted);
+    text-decoration:none; cursor:pointer;
+  }
+  .guest-link:hover{ color:var(--accent); }
+  .msg{
+    margin-top:14px; padding:9px 12px; border-radius:8px; font-size:13px; display:none;
+  }
+  .msg.error{ display:block; background:var(--danger-soft); color:var(--danger); }
+  .msg.success{ display:block; background:var(--success-soft); color:var(--success); }
+  .divider{ text-align:center; color:var(--muted); font-size:11.5px; margin:20px 0 4px; }
+</style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="brand">
+      <div class="brand-mark">N</div>
+      <div class="brand-name">Nimbus</div>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="login">Sign in</div>
+      <div class="tab" data-tab="signup">Create profile</div>
+    </div>
+
+    <!-- SIGN IN -->
+    <div id="panel-login">
+      <h1>Welcome back</h1>
+      <p class="subtitle">Sign in to pick up where you left off.</p>
+      <label for="login-email">Email</label>
+      <input id="login-email" type="email" autocomplete="email" placeholder="you@example.com">
+      <label for="login-password">Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" placeholder="••••••••••">
+      <button class="btn-primary" id="btn-login">Sign in</button>
+      <div class="msg" id="login-msg"></div>
+      <div class="divider">or</div>
+      <a class="guest-link" id="btn-guest">Continue as guest</a>
+    </div>
+
+    <!-- SIGN UP -->
+    <div id="panel-signup" style="display:none;">
+      <h1>Create your profile</h1>
+      <p class="subtitle">Your board data is encrypted and saved to your account.</p>
+      <label for="signup-name">Name</label>
+      <input id="signup-name" type="text" autocomplete="name" placeholder="Jordan Lee">
+      <label for="signup-email">Email</label>
+      <input id="signup-email" type="email" autocomplete="email" placeholder="you@example.com">
+      <label for="signup-password">Password</label>
+      <input id="signup-password" type="password" autocomplete="new-password" placeholder="••••••••••">
+      <div class="pw-rules">
+        Must include:
+        <ul>
+          <li id="rule-len">at least 10 characters</li>
+          <li id="rule-upper">an uppercase letter</li>
+          <li id="rule-lower">a lowercase letter</li>
+          <li id="rule-digit">a number</li>
+          <li id="rule-symbol">a symbol</li>
+        </ul>
+      </div>
+      <button class="btn-primary" id="btn-signup" disabled>Create profile</button>
+      <div class="msg" id="signup-msg"></div>
+    </div>
+  </div>
+
+<script>
+  // Point this at your deployed backend, e.g. "https://nimbus-api.onrender.com"
+  const API_BASE = window.NIMBUS_API_BASE || "http://localhost:4000";
+
+  const tabs = document.querySelectorAll(".tab");
+  const panels = { login: document.getElementById("panel-login"), signup: document.getElementById("panel-signup") };
+  tabs.forEach(t => t.addEventListener("click", () => {
+    tabs.forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    Object.values(panels).forEach(p => p.style.display = "none");
+    panels[t.dataset.tab].style.display = "block";
+  }));
+
+  function showMsg(el, text, kind){
+    el.textContent = text;
+    el.className = "msg " + kind;
+  }
+
+  async function api(path, options){
+    const res = await fetch(API_BASE + path, {
+      method: "GET",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      ...options,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || "Something went wrong.");
+    return body;
+  }
+
+  // ---- Password strength live-check ----
+  const pwInput = document.getElementById("signup-password");
+  const rules = {
+    len:   { el: document.getElementById("rule-len"),   test: v => v.length >= 10 },
+    upper: { el: document.getElementById("rule-upper"), test: v => /[A-Z]/.test(v) },
+    lower: { el: document.getElementById("rule-lower"), test: v => /[a-z]/.test(v) },
+    digit: { el: document.getElementById("rule-digit"), test: v => /[0-9]/.test(v) },
+    symbol:{ el: document.getElementById("rule-symbol"),test: v => /[^A-Za-z0-9]/.test(v) },
+  };
+  const signupBtn = document.getElementById("btn-signup");
+  function checkPasswordRules(){
+    const v = pwInput.value;
+    let allMet = true;
+    Object.values(rules).forEach(r => {
+      const met = r.test(v);
+      r.el.classList.toggle("met", met);
+      if (!met) allMet = false;
+    });
+    const nameOk = document.getElementById("signup-name").value.trim().length > 0;
+    const emailOk = document.getElementById("signup-email").value.trim().length > 3;
+    signupBtn.disabled = !(allMet && nameOk && emailOk);
+  }
+  pwInput.addEventListener("input", checkPasswordRules);
+  document.getElementById("signup-name").addEventListener("input", checkPasswordRules);
+  document.getElementById("signup-email").addEventListener("input", checkPasswordRules);
+
+  // ---- Actions ----
+  document.getElementById("btn-login").addEventListener("click", async () => {
+    const msg = document.getElementById("login-msg");
+    const email = document.getElementById("login-email").value.trim();
+    const password = document.getElementById("login-password").value;
+    if (!email || !password) return showMsg(msg, "Enter your email and password.", "error");
+    try {
+      await api("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+      window.location.href = "agile-board.html";
+    } catch (err) {
+      showMsg(msg, err.message, "error");
+    }
+  });
+
+  document.getElementById("btn-guest").addEventListener("click", async () => {
+    const msg = document.getElementById("login-msg");
+    try {
+      await api("/api/auth/guest", { method: "POST" });
+      window.location.href = "agile-board.html";
+    } catch (err) {
+      showMsg(msg, err.message, "error");
+    }
+  });
+
+  document.getElementById("btn-signup").addEventListener("click", async () => {
+    const msg = document.getElementById("signup-msg");
+    const name = document.getElementById("signup-name").value.trim();
+    const email = document.getElementById("signup-email").value.trim();
+    const password = pwInput.value;
+    try {
+      await api("/api/auth/signup", { method: "POST", body: JSON.stringify({ name, email, password }) });
+      window.location.href = "agile-board.html";
+    } catch (err) {
+      showMsg(msg, err.message, "error");
+    }
+  });
+
+  // If already logged in, skip straight to the board.
+  api("/api/auth/me").then(() => { window.location.href = "agile-board.html"; }).catch(() => {});
+</script>
+</body>
+</html>
