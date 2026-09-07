@@ -37,8 +37,10 @@ function issueSession(res, user) {
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: "30d" });
   res.cookie("nimbus_session", token, {
     httpOnly: true,
-    secure: IS_PROD,
-    sameSite: "lax",
+    secure: true,        // required whenever sameSite is "none"
+    sameSite: "none",    // frontend and API are on different Render subdomains,
+                          // which browsers treat as cross-site — "lax" would
+                          // silently block the cookie from being sent back.
     maxAge: 30 * 24 * 60 * 60 * 1000,
   });
 }
@@ -161,7 +163,7 @@ app.post("/api/auth/guest", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (req, res) => {
-  res.clearCookie("nimbus_session");
+  res.clearCookie("nimbus_session", { httpOnly: true, secure: true, sameSite: "none" });
   res.json({ ok: true });
 });
 
