@@ -65,6 +65,16 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Team creation and management are a premium feature. Viewing a team you've
+// already been added to (by a premium owner) is NOT gated — only creating
+// and administering one is.
+function requirePremium(req, res, next) {
+  if (!req.user.is_premium) {
+    return res.status(402).json({ error: "Upgrade to Premium to manage teams.", code: "PREMIUM_REQUIRED" });
+  }
+  next();
+}
+
 /** Returns the caller's role row in a given team, or null if not a member. */
 async function getMembership(userId, teamId) {
   const { rows } = await pool.query(
@@ -238,7 +248,7 @@ app.post("/api/link-code", requireAuth, async (req, res) => {
 // =========================================================================
 
 // Create a team. The creator becomes Owner with full rights automatically.
-app.post("/api/teams", requireAuth, async (req, res) => {
+app.post("/api/teams", requireAuth, requirePremium, async (req, res) => {
   const { name } = req.body || {};
   if (!name || !name.trim()) return res.status(400).json({ error: "Team name is required." });
   const client = await pool.connect();
@@ -307,7 +317,7 @@ app.get("/api/teams/:teamId", requireAuth, async (req, res) => {
 
 // Redeem someone else's one-time link code to add them to this team.
 // Requires can_manage_team on the caller's membership (Owner by default).
-app.post("/api/teams/:teamId/members", requireAuth, async (req, res) => {
+app.post("/api/teams/:teamId/members", requireAuth, requirePremium, async (req, res) => {
   const { code, roleId } = req.body || {};
   if (!code) return res.status(400).json({ error: "A link code is required." });
 
@@ -366,7 +376,7 @@ app.post("/api/teams/:teamId/members", requireAuth, async (req, res) => {
 });
 
 // Change a member's role. Owner/manager only.
-app.patch("/api/teams/:teamId/members/:userId", requireAuth, async (req, res) => {
+app.patch("/api/teams/:teamId/members/:userId", requireAuth, requirePremium, async (req, res) => {
   const { roleId } = req.body || {};
   const membership = await getMembership(req.user.id, req.params.teamId);
   if (!membership || !membership.can_manage_team) {
@@ -381,7 +391,7 @@ app.patch("/api/teams/:teamId/members/:userId", requireAuth, async (req, res) =>
 });
 
 // Remove a member. Owner/manager only; cannot remove the team owner.
-app.delete("/api/teams/:teamId/members/:userId", requireAuth, async (req, res) => {
+app.delete("/api/teams/:teamId/members/:userId", requireAuth, requirePremium, async (req, res) => {
   const membership = await getMembership(req.user.id, req.params.teamId);
   if (!membership || !membership.can_manage_team) {
     return res.status(403).json({ error: "Only a team owner or manager can remove members." });
@@ -398,7 +408,7 @@ app.delete("/api/teams/:teamId/members/:userId", requireAuth, async (req, res) =
 });
 
 // Create a new role definition (e.g. "Manager"). Owner/manager only.
-app.post("/api/teams/:teamId/roles", requireAuth, async (req, res) => {
+app.post("/api/teams/:teamId/roles", requireAuth, requirePremium, async (req, res) => {
   const { name, canEdit, canView, canManageTeam } = req.body || {};
   const membership = await getMembership(req.user.id, req.params.teamId);
   if (!membership || !membership.can_manage_team) {
@@ -420,7 +430,7 @@ app.post("/api/teams/:teamId/roles", requireAuth, async (req, res) => {
 });
 
 // Edit a role definition. Owner/manager only.
-app.patch("/api/teams/:teamId/roles/:roleId", requireAuth, async (req, res) => {
+app.patch("/api/teams/:teamId/roles/:roleId", requireAuth, requirePremium, async (req, res) => {
   const { name, canEdit, canView, canManageTeam } = req.body || {};
   const membership = await getMembership(req.user.id, req.params.teamId);
   if (!membership || !membership.can_manage_team) {
@@ -439,7 +449,7 @@ app.patch("/api/teams/:teamId/roles/:roleId", requireAuth, async (req, res) => {
 });
 
 // Delete a role. Owner/manager only; cannot delete a role still in use.
-app.delete("/api/teams/:teamId/roles/:roleId", requireAuth, async (req, res) => {
+app.delete("/api/teams/:teamId/roles/:roleId", requireAuth, requirePremium, async (req, res) => {
   const membership = await getMembership(req.user.id, req.params.teamId);
   if (!membership || !membership.can_manage_team) {
     return res.status(403).json({ error: "Only a team owner or manager can delete roles." });
