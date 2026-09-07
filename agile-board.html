@@ -498,6 +498,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script>window.NIMBUS_API_BASE = "https://azt-agile-git-lmvo.onrender.com";</script>
 <script>
 (function(){
   "use strict";
@@ -527,17 +528,19 @@
 
   /* ============ Backend / auth ============ */
   // Point this at your deployed Render backend, e.g. "https://nimbus-api.onrender.com"
-  const API_BASE = window.NIMBUS_API_BASE || "https://azt-agile-app.onrender.com";
+  const API_BASE = window.NIMBUS_API_BASE || "http://localhost:4000";
   let currentUser = null;
   let saveTimer = null;
   let hydrated = false; // don't save to the server until initial load has happened
 
   async function api(path, options){
+    const token = sessionStorage.getItem("nimbus_token");
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = "Bearer " + token;
     const res = await fetch(API_BASE + path, {
       method: "GET",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
       ...options,
+      headers: { ...headers, ...(options && options.headers) },
     });
     const body = await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(body.error || "Something went wrong.");
@@ -545,10 +548,15 @@
   }
 
   async function boot(){
+    if (!sessionStorage.getItem("nimbus_token")) {
+      window.location.href = "index.html";
+      return;
+    }
     try{
       const { user } = await api("/api/auth/me");
       currentUser = user;
     }catch(err){
+      sessionStorage.removeItem("nimbus_token");
       window.location.href = "index.html";
       return;
     }
@@ -770,6 +778,7 @@
     document.getElementById("btn-logout").addEventListener("click", async (e)=>{
       e.preventDefault();
       try{ await api("/api/auth/logout", { method:"POST" }); }catch(err){}
+      sessionStorage.removeItem("nimbus_token");
       window.location.href = "index.html";
     });
   }
