@@ -268,6 +268,18 @@ app.post("/api/teams", requireAuth, requirePremium, async (req, res) => {
       "INSERT INTO team_members (team_id, user_id, role_id) VALUES ($1, $2, $3)",
       [team.id, req.user.id, roleRows[0].id]
     );
+    // Seed a default workflow so the board isn't empty on day one.
+    await client.query(
+      `INSERT INTO team_statuses (team_id, key, label, color, sort_order, is_done) VALUES
+       ($1, 'todo', 'To Do', '6B7280', 0, FALSE),
+       ($1, 'in_progress', 'In Progress', 'F2A93B', 1, FALSE),
+       ($1, 'done', 'Done', '1FA97A', 2, TRUE)`,
+      [team.id]
+    );
+    await client.query(
+      "INSERT INTO team_branding (team_id, accent_color) VALUES ($1, '5B5FEF')",
+      [team.id]
+    );
     await client.query("COMMIT");
     res.json({ team });
   } catch (err) {
@@ -457,6 +469,366 @@ app.delete("/api/teams/:teamId/roles/:roleId", requireAuth, requirePremium, asyn
   const { rows: inUse } = await pool.query("SELECT 1 FROM team_members WHERE role_id = $1 LIMIT 1", [req.params.roleId]);
   if (inUse[0]) return res.status(400).json({ error: "Reassign members off this role before deleting it." });
   await pool.query("DELETE FROM team_roles WHERE id = $1 AND team_id = $2", [req.params.roleId, req.params.teamId]);
+  res.json({ ok: true });
+});
+
+// =========================================================================
+// TEAM WORKFLOWS  (custom status columns per team)
+// =========================================================================
+
+app.get("/api/teams/:teamId/statuses", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership) return res.status(403).json({ error: "You are not a member of this team." });
+  const { rows } = await pool.query(
+    "SELECT * FROM team_statuses WHERE team_id = $1 ORDER BY sort_order, created_at",
+    [req.params.teamId]
+  );
+  res.json({ statuses: rows });
+});
+
+app.post("/api/teams/:teamId/statuses", requireAuth, requirePremium, async (req, res) => {
+  const { key, label, color, isDone, sortOrder } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can edit the workflow." });
+  }
+  if (!key || !label) return res.status(400).json({ error: "key and label are required." });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO team_statuses (team_id, key, label, color, is_done, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.params.teamId, key.trim(), label.trim(), color || "6B7280", !!isDone, sortOrder ?? 0]
+    );
+    res.json({ status: rows[0] });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "A status with that key already exists on this team." });
+    console.error(err);
+    res.status(500).json({ error: "Could not create status." });
+  }
+});
+
+app.patch("/api/teams/:teamId/statuses/:statusId", requireAuth, requirePremium, async (req, res) => {
+  const { label, color, isDone, sortOrder } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can edit the workflow." });
+  }
+  await pool.query(
+    `UPDATE team_statuses SET
+       label = COALESCE($1, label),
+       color = COALESCE($2, color),
+       is_done = COALESCE($3, is_done),
+       sort_order = COALESCE($4, sort_order)
+     WHERE id = $5 AND team_id = $6`,
+    [label, color, isDone, sortOrder, req.params.statusId, req.params.teamId]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/teams/:teamId/statuses/:statusId", requireAuth, requirePremium, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can edit the workflow." });
+  }
+  const { rows: inUse } = await pool.query("SELECT 1 FROM team_issues WHERE status_id = $1 LIMIT 1", [req.params.statusId]);
+  if (inUse[0]) return res.status(400).json({ error: "Move issues off this status before deleting it." });
+  await pool.query("DELETE FROM team_statuses WHERE id = $1 AND team_id = $2", [req.params.statusId, req.params.teamId]);
+  res.json({ ok: true });
+});
+
+// =========================================================================
+// TEAM CUSTOM FIELDS
+// =========================================================================
+
+app.get("/api/teams/:teamId/fields", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership) return res.status(403).json({ error: "You are not a member of this team." });
+  const { rows } = await pool.query(
+    "SELECT * FROM team_custom_fields WHERE team_id = $1 ORDER BY sort_order, created_at",
+    [req.params.teamId]
+  );
+  res.json({ fields: rows });
+});
+
+app.post("/api/teams/:teamId/fields", requireAuth, requirePremium, async (req, res) => {
+  const { fieldKey, label, fieldType, options, sortOrder } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can edit custom fields." });
+  }
+  if (!fieldKey || !label) return res.status(400).json({ error: "fieldKey and label are required." });
+  const validTypes = ["text", "number", "select", "date"];
+  if (fieldType && !validTypes.includes(fieldType)) {
+    return res.status(400).json({ error: `fieldType must be one of: ${validTypes.join(", ")}` });
+  }
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO team_custom_fields (team_id, field_key, label, field_type, options, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.params.teamId, fieldKey.trim(), label.trim(), fieldType || "text", options ? JSON.stringify(options) : null, sortOrder ?? 0]
+    );
+    res.json({ field: rows[0] });
+  } catch (err) {
+    if (err.code === "23505") return res.status(409).json({ error: "A field with that key already exists on this team." });
+    console.error(err);
+    res.status(500).json({ error: "Could not create field." });
+  }
+});
+
+app.patch("/api/teams/:teamId/fields/:fieldId", requireAuth, requirePremium, async (req, res) => {
+  const { label, fieldType, options, sortOrder } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can edit custom fields." });
+  }
+  await pool.query(
+    `UPDATE team_custom_fields SET
+       label = COALESCE($1, label),
+       field_type = COALESCE($2, field_type),
+       options = COALESCE($3, options),
+       sort_order = COALESCE($4, sort_order)
+     WHERE id = $5 AND team_id = $6`,
+    [label, fieldType, options ? JSON.stringify(options) : null, sortOrder, req.params.fieldId, req.params.teamId]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/teams/:teamId/fields/:fieldId", requireAuth, requirePremium, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can edit custom fields." });
+  }
+  await pool.query("DELETE FROM team_custom_fields WHERE id = $1 AND team_id = $2", [req.params.fieldId, req.params.teamId]);
+  res.json({ ok: true });
+});
+
+// =========================================================================
+// TEAM ISSUES  (the shared board — visible to every team member)
+// =========================================================================
+
+async function logIssueHistory(client, issue) {
+  await client.query(
+    `INSERT INTO issue_status_history (issue_id, team_id, status_id, points, changed_by)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [issue.id, issue.team_id, issue.status_id, issue.points, issue.changed_by || null]
+  );
+}
+
+app.get("/api/teams/:teamId/issues", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_view) return res.status(403).json({ error: "You can't view this team's board." });
+  const { rows } = await pool.query(
+    `SELECT ti.*, ts.key AS status_key, ts.label AS status_label, ts.color AS status_color, ts.is_done AS status_is_done,
+            u.name AS assignee_name
+     FROM team_issues ti
+     LEFT JOIN team_statuses ts ON ts.id = ti.status_id
+     LEFT JOIN users u ON u.id = ti.assignee_id
+     WHERE ti.team_id = $1
+     ORDER BY ti.created_at`,
+    [req.params.teamId]
+  );
+  res.json({ issues: rows });
+});
+
+app.post("/api/teams/:teamId/issues", requireAuth, async (req, res) => {
+  const { type, title, description, statusId, priority, assigneeId, points, parentId, customFields, dueDate } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_edit) return res.status(403).json({ error: "You don't have edit access on this team." });
+  if (!title || !title.trim()) return res.status(400).json({ error: "Title is required." });
+
+  // Assignee, if given, must be a real member of this team.
+  if (assigneeId) {
+    const check = await getMembership(assigneeId, req.params.teamId);
+    if (!check) return res.status(400).json({ error: "Assignee must be a member of this team." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: countRows } = await client.query("SELECT count(*)::int AS n FROM team_issues WHERE team_id = $1", [req.params.teamId]);
+    const { rows: teamRows } = await client.query("SELECT name FROM teams WHERE id = $1", [req.params.teamId]);
+    const prefix = (teamRows[0]?.name || "TEAM").replace(/[^A-Za-z]/g, "").slice(0, 4).toUpperCase() || "TEAM";
+    const key = `${prefix}-${countRows[0].n + 1}`;
+
+    const { rows } = await client.query(
+      `INSERT INTO team_issues
+         (team_id, key, type, title, description, status_id, priority, assignee_id, points, parent_id, custom_fields, due_date, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [
+        req.params.teamId, key, type || "Task", title.trim(), description || null, statusId || null,
+        priority || "Medium", assigneeId || null, points ?? null, parentId || null,
+        customFields ? JSON.stringify(customFields) : "{}", dueDate || null, req.user.id,
+      ]
+    );
+    const issue = rows[0];
+    await logIssueHistory(client, { ...issue, changed_by: req.user.id });
+    await client.query("COMMIT");
+    res.json({ issue });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    res.status(500).json({ error: "Could not create issue." });
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/teams/:teamId/issues/:issueId", requireAuth, async (req, res) => {
+  const { type, title, description, statusId, priority, assigneeId, points, parentId, customFields, dueDate } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_edit) return res.status(403).json({ error: "You don't have edit access on this team." });
+
+  if (assigneeId) {
+    const check = await getMembership(assigneeId, req.params.teamId);
+    if (!check) return res.status(400).json({ error: "Assignee must be a member of this team." });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `UPDATE team_issues SET
+         type = COALESCE($1, type),
+         title = COALESCE($2, title),
+         description = COALESCE($3, description),
+         status_id = COALESCE($4, status_id),
+         priority = COALESCE($5, priority),
+         assignee_id = $6,
+         points = COALESCE($7, points),
+         parent_id = $8,
+         custom_fields = COALESCE($9, custom_fields),
+         due_date = COALESCE($10, due_date),
+         updated_at = now()
+       WHERE id = $11 AND team_id = $12
+       RETURNING *`,
+      [
+        type, title, description, statusId, priority,
+        assigneeId !== undefined ? assigneeId : null, points,
+        parentId !== undefined ? parentId : null,
+        customFields ? JSON.stringify(customFields) : null, dueDate,
+        req.params.issueId, req.params.teamId,
+      ]
+    );
+    if (!rows[0]) throw { status: 404, message: "Issue not found." };
+    await logIssueHistory(client, { ...rows[0], changed_by: req.user.id });
+    await client.query("COMMIT");
+    res.json({ issue: rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Could not update issue." });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/teams/:teamId/issues/:issueId", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_edit) return res.status(403).json({ error: "You don't have edit access on this team." });
+  await pool.query("DELETE FROM team_issues WHERE id = $1 AND team_id = $2", [req.params.issueId, req.params.teamId]);
+  res.json({ ok: true });
+});
+
+// =========================================================================
+// BURNDOWN  (built from issue_status_history — a real day-by-day series,
+// not just today's snapshot)
+// =========================================================================
+
+app.get("/api/teams/:teamId/burndown", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_view) return res.status(403).json({ error: "You can't view this team's board." });
+  const days = Math.min(parseInt(req.query.days) || 30, 180);
+
+  // Total points committed (every issue's most recent point value) vs.
+  // remaining points, tracked day by day using the history table.
+  const { rows } = await pool.query(
+    `WITH days AS (
+       SELECT generate_series(CURRENT_DATE - ($2::int - 1), CURRENT_DATE, '1 day')::date AS day
+     ),
+     latest_per_day AS (
+       SELECT h.issue_id, d.day,
+              (SELECT h2.status_id FROM issue_status_history h2
+               WHERE h2.issue_id = h.issue_id AND h2.changed_at::date <= d.day
+               ORDER BY h2.changed_at DESC LIMIT 1) AS status_id,
+              (SELECT h2.points FROM issue_status_history h2
+               WHERE h2.issue_id = h.issue_id AND h2.changed_at::date <= d.day
+               ORDER BY h2.changed_at DESC LIMIT 1) AS points
+       FROM (SELECT DISTINCT issue_id FROM issue_status_history WHERE team_id = $1) h
+       CROSS JOIN days d
+     )
+     SELECT lpd.day,
+            COALESCE(SUM(lpd.points) FILTER (WHERE ts.is_done IS NOT TRUE), 0)::int AS remaining_points,
+            COALESCE(SUM(lpd.points), 0)::int AS total_points
+     FROM latest_per_day lpd
+     LEFT JOIN team_statuses ts ON ts.id = lpd.status_id
+     WHERE lpd.status_id IS NOT NULL
+     GROUP BY lpd.day
+     ORDER BY lpd.day`,
+    [req.params.teamId, days]
+  );
+  res.json({ series: rows });
+});
+
+// =========================================================================
+// CSV EXPORT
+// =========================================================================
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  const s = String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+app.get("/api/teams/:teamId/issues/export.csv", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_view) return res.status(403).json({ error: "You can't view this team's board." });
+  const { rows } = await pool.query(
+    `SELECT ti.key, ti.type, ti.title, ts.label AS status, ti.priority, u.name AS assignee,
+            ti.points, ti.due_date, ti.created_at
+     FROM team_issues ti
+     LEFT JOIN team_statuses ts ON ts.id = ti.status_id
+     LEFT JOIN users u ON u.id = ti.assignee_id
+     WHERE ti.team_id = $1
+     ORDER BY ti.created_at`,
+    [req.params.teamId]
+  );
+  const header = ["Key", "Type", "Title", "Status", "Priority", "Assignee", "Points", "Due Date", "Created"];
+  const lines = [header.join(",")];
+  for (const r of rows) {
+    lines.push([r.key, r.type, r.title, r.status, r.priority, r.assignee, r.points, r.due_date, r.created_at].map(csvEscape).join(","));
+  }
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="team-issues.csv"`);
+  res.send(lines.join("\n"));
+});
+
+// =========================================================================
+// TEAM BRANDING
+// =========================================================================
+
+app.get("/api/teams/:teamId/branding", requireAuth, async (req, res) => {
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership) return res.status(403).json({ error: "You are not a member of this team." });
+  const { rows } = await pool.query("SELECT * FROM team_branding WHERE team_id = $1", [req.params.teamId]);
+  res.json({ branding: rows[0] || { accent_color: "5B5FEF", logo_url: null } });
+});
+
+app.patch("/api/teams/:teamId/branding", requireAuth, requirePremium, async (req, res) => {
+  const { accentColor, logoUrl } = req.body || {};
+  const membership = await getMembership(req.user.id, req.params.teamId);
+  if (!membership || !membership.can_manage_team) {
+    return res.status(403).json({ error: "Only a team owner or manager can update branding." });
+  }
+  await pool.query(
+    `INSERT INTO team_branding (team_id, accent_color, logo_url, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (team_id) DO UPDATE SET
+       accent_color = COALESCE(EXCLUDED.accent_color, team_branding.accent_color),
+       logo_url = EXCLUDED.logo_url,
+       updated_at = now()`,
+    [req.params.teamId, accentColor || "5B5FEF", logoUrl || null]
+  );
   res.json({ ok: true });
 });
 
