@@ -549,7 +549,7 @@
       const { user } = await api("/api/auth/me");
       currentUser = user;
     }catch(err){
-      window.location.href = "login.html";
+      window.location.href = "index.html";
       return;
     }
     document.getElementById("account-name").textContent = currentUser.name + (currentUser.is_guest ? " (guest)" : "");
@@ -770,7 +770,7 @@
     document.getElementById("btn-logout").addEventListener("click", async (e)=>{
       e.preventDefault();
       try{ await api("/api/auth/logout", { method:"POST" }); }catch(err){}
-      window.location.href = "login.html";
+      window.location.href = "index.html";
     });
   }
 
