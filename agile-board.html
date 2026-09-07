@@ -379,9 +379,19 @@
           <div class="panel-card">
             <div class="panel-card-title">Your teams</div>
             <div id="team-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;"></div>
-            <div style="display:flex;gap:8px;">
+
+            <div id="create-team-unlocked" style="display:flex;gap:8px;">
               <input type="text" id="new-team-name" placeholder="New team name" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);font-family:inherit;font-size:13px;">
               <button class="btn btn-primary" id="btn-create-team">Create team</button>
+            </div>
+
+            <div id="create-team-locked" style="display:none;align-items:center;gap:12px;background:var(--bg);border:1px dashed var(--border);border-radius:10px;padding:14px 16px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B4740A" stroke-width="2.2" style="flex-shrink:0;"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/></svg>
+              <div style="flex:1;">
+                <div style="font-weight:600;font-size:13.5px;">Creating and managing teams is a Premium feature</div>
+                <div style="font-size:12.5px;color:var(--muted);">Upgrade to add teammates, assign roles, and manage members.</div>
+              </div>
+              <button class="btn" id="btn-team-upgrade-cta" style="border-color:#F2A93B;color:#B4740A;background:#FEF3E1;flex-shrink:0;">Upgrade to Premium</button>
             </div>
           </div>
 
@@ -527,7 +537,7 @@
   };
 
   /* ============ Backend / auth ============ */
-  // Point this at your deployed Render backend, e.g. "https://nimbus-api.onrender.com"
+  // Point this at your deployed Render backend, e.g. "https://azt-agile-git-lmvo.onrender.com"
   const API_BASE = window.NIMBUS_API_BASE || "https://azt-agile-git-lmvo.onrender.com";
   let currentUser = null;
   let saveTimer = null;
@@ -562,6 +572,8 @@
     }
     document.getElementById("account-name").textContent = currentUser.name + (currentUser.is_guest ? " (guest)" : "");
     document.getElementById("nav-admin").style.display = currentUser.is_admin ? "flex" : "none";
+    document.getElementById("create-team-unlocked").style.display = currentUser.is_premium ? "flex" : "none";
+    document.getElementById("create-team-locked").style.display = currentUser.is_premium ? "none" : "flex";
     if(currentUser.is_premium){
       const btn = document.getElementById("btn-upgrade");
       btn.textContent = "★ Premium";
@@ -647,7 +659,10 @@
     panel.style.display = "block";
     document.getElementById("team-detail-title").textContent = team ? team.name : "Team";
 
-    const canManage = detail.myMembership.can_manage_team;
+    // Defensive: even if this membership row has can_manage_team, only show
+    // management controls while the account is actually premium (e.g. covers
+    // a lapsed subscription without needing to touch existing role rows).
+    const canManage = detail.myMembership.can_manage_team && currentUser.is_premium;
     document.getElementById("team-add-member-block").style.display = canManage ? "block" : "none";
     document.getElementById("team-roles-block").style.display = canManage ? "block" : "none";
 
@@ -767,13 +782,16 @@
       }catch(err){ showToast(err.message); }
     });
 
-    document.getElementById("btn-upgrade").addEventListener("click", async ()=>{
+    async function requestPremiumUpgrade(){
       try{
         const { formUrl } = await api("/api/premium/request", { method:"POST" });
         if(formUrl) window.open(formUrl, "_blank");
         else showToast("Premium form isn't configured yet — contact the site owner.");
       }catch(err){ showToast(err.message); }
-    });
+    }
+
+    document.getElementById("btn-upgrade").addEventListener("click", requestPremiumUpgrade);
+    document.getElementById("btn-team-upgrade-cta").addEventListener("click", requestPremiumUpgrade);
 
     document.getElementById("btn-logout").addEventListener("click", async (e)=>{
       e.preventDefault();
