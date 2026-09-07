@@ -33,21 +33,19 @@ app.use(
 // Session helpers — JWT stored in an httpOnly cookie, not localStorage,
 // so it can't be read or exfiltrated by page JavaScript.
 // -----------------------------------------------------------------------
-function issueSession(res, user) {
-  const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: "30d" });
-  res.cookie("nimbus_session", token, {
-    httpOnly: true,
-    secure: true,        // required whenever sameSite is "none"
-    sameSite: "none",    // frontend and API are on different Render subdomains,
-                          // which browsers treat as cross-site — "lax" would
-                          // silently block the cookie from being sent back.
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  });
+// Cross-domain note: the frontend (static site) and this API live on
+// different domains. Browsers increasingly block cross-site cookies
+// outright regardless of SameSite settings, so sessions are issued as a
+// signed token in the response body instead, and sent back by the client
+// as "Authorization: Bearer <token>" on every request.
+function issueSessionToken(user) {
+  return jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: "30d" });
 }
 
 async function requireAuth(req, res, next) {
   try {
-    const token = req.cookies?.nimbus_session;
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
     if (!token) return res.status(401).json({ error: "Not logged in." });
     const payload = jwt.verify(token, JWT_SECRET);
     const { rows } = await pool.query(
@@ -84,7 +82,7 @@ async function getMembership(userId, teamId) {
 // =========================================================================
 
 // Create a full account (name + email + password). Also used to convert
-// a guest into a permanent account (pass an existing guest session cookie).
+// a guest into a permanent account.
 app.post("/api/auth/signup", async (req, res) => {
   const { name, email, password } = req.body || {};
   if (!name || !email || !password) {
@@ -102,8 +100,8 @@ app.post("/api/auth/signup", async (req, res) => {
       [name.trim(), email.trim().toLowerCase(), passwordHash]
     );
     const user = rows[0];
-    issueSession(res, user);
-    res.json({ user });
+    const token = issueSessionToken(user);
+    res.json({ user, token });
   } catch (err) {
     if (err.code === "23505") {
       return res.status(409).json({ error: "An account with that email already exists." });
@@ -128,9 +126,10 @@ app.post("/api/auth/login", async (req, res) => {
     if (!user) return res.status(401).json({ error: "No account with that email. Sign up instead?" });
     const ok = await bcrypt.compare(password, user.password_hash);
     if (!ok) return res.status(401).json({ error: "Incorrect password." });
-    issueSession(res, user);
+    const token = issueSessionToken(user);
     res.json({
       user: { id: user.id, name: user.name, email: user.email, is_admin: user.is_admin, is_premium: user.is_premium, is_guest: user.is_guest },
+      token,
     });
   } catch (err) {
     console.error(err);
@@ -154,8 +153,8 @@ app.post("/api/auth/guest", async (req, res) => {
       ["Guest", guestEmail, passwordHash]
     );
     const user = rows[0];
-    issueSession(res, user);
-    res.json({ user });
+    const token = issueSessionToken(user);
+    res.json({ user, token });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Could not create guest session." });
@@ -163,7 +162,9 @@ app.post("/api/auth/guest", async (req, res) => {
 });
 
 app.post("/api/auth/logout", (req, res) => {
-  res.clearCookie("nimbus_session", { httpOnly: true, secure: true, sameSite: "none" });
+  // Token-based sessions have nothing to clear server-side — the client
+  // just discards the token it's holding. Kept as a real endpoint so the
+  // frontend has a stable place to call.
   res.json({ ok: true });
 });
 
